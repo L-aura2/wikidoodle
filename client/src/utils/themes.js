@@ -1,0 +1,17 @@
+export const THEMES = [
+    { id: 'dieren',       label: ' Dieren' },
+    { id: 'landen',       label: ' Landen' },
+    { id: 'steden',       label: '️ Steden' },
+    { id: 'fruit',        label: ' Fruit' },
+    { id: 'groenten',     label: ' Groenten' },
+    { id: 'sporten',      label: ' Sporten' },
+    { id: 'muziekinstr',  label: ' Muziekinstrumenten' },
+    { id: 'planeten',     label: ' Planeten & manen' },
+    { id: 'beroepen',     label: ' Beroepen' },
+    { id: 'dranken',      label: ' Dranken' },
+    { id: 'zomer',        label: '️ Zomer' },
+    { id: 'voertuigen',   label: ' Voertuigen' },
+    { id: 'kleuren',      label: ' Kleuren' },
+    { id: 'gebouwen',     label: '️ Gebouwen' },
+    { id: 'insecten',     label: ' Insecten' },
+]

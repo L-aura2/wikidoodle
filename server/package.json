@@ -1,0 +1,14 @@
+{
+  "name": "wikidoodle-server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "nanoid": "^5.1.6",
+    "ws": "^8.19.0"
+  }
+}
