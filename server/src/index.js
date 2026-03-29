@@ -17,6 +17,7 @@ const wss = new WebSocketServer({ server: httpServer })
 
 const gameState = {
     currentWord: null,
+    currentHint: null,
     currentDrawer: null,
     roundStartTime: null,
     roundDuration: 120000,
@@ -53,6 +54,7 @@ function handleDrawerDisconnect(username) {
     // gameState.roundActive = false
     clearTimeout(gameState.hintTimeout)
     gameState.currentWord = null
+    gameState.currentHint = null
     gameState.currentDrawer = null
     broadcastAll({
         type: 'round-ended',
@@ -72,6 +74,7 @@ function assignNextDrawer() {
 
     gameState.currentDrawer = next
     gameState.currentWord = null
+    gameState.currentHint = null
     gameState.currentTheme = null
     gameState.wordPool = []
 
@@ -155,6 +158,7 @@ wss.on('connection', (ws) => {
                         clearTimeout(gameState.roundTimeout)
                         broadcastAll({ type: 'round-ended', reason: `Iedereen heeft het geraden! Het woord was: "${gameState.currentWord}"` })
                         gameState.currentWord = null
+                        gameState.currentHint = null
                         assignNextDrawer()
                     }
 
@@ -184,6 +188,7 @@ wss.on('connection', (ws) => {
                 clearTimeout(gameState.hintTimeout)
                 clearTimeout(gameState.roundTimeout)
                 gameState.currentWord = null
+                gameState.currentHint = null
                 broadcastAll({type: 'round-ended', reason: 'Ronde beëindigd door tekenaar'})
                 assignNextDrawer()
                 break
@@ -193,6 +198,7 @@ wss.on('connection', (ws) => {
                     let words
                     if (msg.custom) {
                         words = await validateCustomTheme(msg.wikidataId)
+                        words = words.map(label => ({label, description: ''}))
                         console.log(`Custom theme ${msg.wikidataId} has ${words.length} words`)
                         if (words.length < 25) {
                             ws.send(JSON.stringify({
@@ -222,7 +228,7 @@ wss.on('connection', (ws) => {
                 }
                 // Kies 3 willekeurige woorden
                 const shuffled = [...gameState.wordPool].sort(() => Math.random() - 0.5)
-                const options = shuffled.slice(0, 3)
+                const options = shuffled.slice(0, 3).map(w => w.label)
                 ws.send(JSON.stringify({type: 'word-options', words: options}))
                 break
             }
@@ -231,18 +237,29 @@ wss.on('connection', (ws) => {
                     c.hasGuessed = false
                 })
                 if (ws !== gameState.currentDrawer) return
-                const word = msg.word?.trim()
-                if (!word) return
+                const wordLabel = msg.word?.trim()
+                if (!wordLabel) return
 
-                gameState.currentWord = word
+                let wordObj = null
+                let isCustom = msg.custom
+                if (isCustom) {
+                    // For custom words, create a wordObj-like object
+                    wordObj = { label: wordLabel, description: null }
+                } else {
+                    wordObj = gameState.wordPool.find(w => w.label === wordLabel)
+                    if (!wordObj) return
+                }
+
+                gameState.currentWord = wordObj.label
+                gameState.currentHint = wordObj.description
                 gameState.roundStartTime = Date.now()
 
                 const roundPayload = {
                     type: 'round-started',
-                    wordLength: word.length,
+                    wordLength: wordObj.label.length,
                     startTime: gameState.roundStartTime,
                     duration: gameState.roundDuration,
-                    ...(msg.custom ? {hint: `Het woord begint met de letter "${word[0].toUpperCase()}"`} : {})
+                    // ...(isCustom ? {hint: `Het woord begint met de letter "${wordLabel[0].toUpperCase()}"`} : {})
                 }
                 broadcastAll(roundPayload)
 
@@ -252,21 +269,24 @@ wss.on('connection', (ws) => {
                     if (!gameState.currentWord) return
                     broadcastAll({type: 'round-ended', reason: `Tijd is om! Het woord was: "${gameState.currentWord}"`})
                     gameState.currentWord = null
+                    gameState.currentHint = null
                     assignNextDrawer()
                 }, gameState.roundDuration)
 
                 // Hint achter 90s
-                if (!msg.custom) {
+                if (!isCustom) {
                     clearTimeout(gameState.hintTimeout)
-                    gameState.hintTimeout = setTimeout(async () => {
+                    gameState.hintTimeout = setTimeout(() => {
                         if (!gameState.currentWord) return
                         const guessedAll = [...wss.clients].every(c => c.hasGuessed || c === gameState.currentDrawer)
                         if (!guessedAll) {
-                            try {
-                                const hints = await fetchHintsForWord(gameState.currentWord)
-                                if (hints.length > 0) broadcastAll({type: 'hint', text: hints[0]})
-                            } catch (e) {
-                                console.error('Hint ophalen mislukt:', e)
+                            if (gameState.currentHint) {
+                                broadcastAll({type: 'hint', text: gameState.currentHint})
+                            } else {
+                                // Fallback to fetch
+                                fetchHintsForWord(gameState.currentWord).then(hints => {
+                                    if (hints.length > 0) broadcastAll({type: 'hint', text: hints[0]})
+                                }).catch(e => console.error('Hint ophalen mislukt:', e))
                             }
                         }
                     }, 90000)

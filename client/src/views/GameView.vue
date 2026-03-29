@@ -15,6 +15,9 @@ const sketchContainer = ref(null)
 
 const { timeLeft, roundActive, timerColor, start: startTimer, stop: stopTimer } = roundTimer()
 
+const wordRejectedError = ref('')
+
+
 const currentWord = ref('')
 const messages = ref([])
 const socket = useSocketStore()
@@ -117,10 +120,10 @@ const submitCustomWord = () => {
     return
   }
   socket.send({ type: 'choose-word', word, custom: true })
-  showWordChoice.value = false
+  // showWordChoice.value = false  // Removed: wait for server confirmation
   customWordInput.value = ''
   customWordError.value = ''
-  currentWord.value = word
+  currentWord.value = word  // Set the word for the drawer
 }
 
 const backToLobby = () => {
@@ -278,6 +281,13 @@ onMounted(() => {
     drawerLeftWarning.value = true
   })
 
+  socket.on('word-rejected', (msg) => {
+    wordRejectedError.value = `❌ ${msg.reason || 'Woord afgewezen'}`
+    showWordChoice.value = true  // Re-show the choice screen
+    isLoadingWords.value = false
+    currentWord.value = ''  // Clear the word since it was rejected
+  })
+
   if (sketchContainer.value) {
     p5Instance = new p5(sketch, sketchContainer.value)
   }
@@ -303,6 +313,7 @@ onUnmounted(() => {
   socket.off('theme-set')
   socket.off('theme-rejected')
   socket.off('drawer-left')
+  socket.off('word-rejected')
   p5Instance.remove()
 })
 </script>
@@ -381,6 +392,7 @@ onUnmounted(() => {
               <button @click="submitCustomWord">Bevestig</button>
             </div>
             <p v-if="customWordError" class="error">{{ customWordError }}</p>
+            <p v-if="wordRejectedError" class="error">{{ wordRejectedError }}</p>
           </div>
         </div>
       </div>
