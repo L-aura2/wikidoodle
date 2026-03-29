@@ -6,38 +6,29 @@ import p5 from 'p5'
 import { username } from '../stores/username.js'
 import { useSocketStore } from '../stores/socketStore'
 import { THEMES } from '../utils/themes.js'
-
-
-const socket = useSocketStore()
-const router = useRouter()
+import { roundTimer } from '../composables/roundTimer.js'
 
 let p5Instance = null
 const sketchContainer = ref(null)
 
+const { timeLeft, roundActive, timerColor, start: startTimer, stop: stopTimer } = roundTimer()
+
+const currentWord = ref('')
+const messages = ref([])
+const socket = useSocketStore()
+const router = useRouter()
 const isDrawer = ref(false)
 const selectedColor = ref('#000000')
 const brushSize = ref(12)
 const remoteLijnen = ref([])
 
 const scores = ref({})
-
-// const roundStartTime = ref(null)
-// const roundDuration = ref(0)
-// const timeLeft = ref(0)
-// let timerInterval = null
-
-// const roundActive = ref(false)
-
 const wordLength = ref(0)
-
 const roundEndReason = ref('')
-
 const colors = [
   '#000000', '#FD79A8', '#E74C3C', '#3498DB',
   '#2ECC71', '#F1C40F', '#8B4513', '#FF8C42'
 ]
-
-const messages = ref([])
 
 const wordOptions = ref([])        // de 3 woorden die de tekenaar kan kiezen
 const showWordChoice = ref(false)  // toon/verberg het keuze-scherm
@@ -76,33 +67,6 @@ const validateCustomTheme = () => {
   })
 }
 
-// const startClientTimer = (startTime, duration) => {
-//   roundStartTime.value = startTime
-//   roundDuration.value = duration
-//   roundActive.value = true
-//   roundEndReason.value = ''
-
-//   if (timerInterval) clearInterval(timerInterval)
-//
-//   timerInterval = setInterval(() => {
-//     const elapsed = Date.now() - roundStartTime.value
-//     const remaining = Math.max(0, Math.ceil((roundDuration.value - elapsed) / 1000))
-//     timeLeft.value = remaining
-//
-//     if (remaining <= 0) {
-//       clearInterval(timerInterval)
-//       roundActive.value = false
-//     }
-//   }, 250) // 4x per seconde voor vloeiende weergave
-// }
-
-// const stopTimer = () => {
-//   clearInterval(timerInterval)
-//   timerInterval = null
-//   roundActive.value = false
-//   timeLeft.value = 0
-// }
-
 const wordHint = computed(() => {
   if (!wordLength.value) return ''
   return Array(wordLength.value).fill('_').join(' ')
@@ -125,7 +89,6 @@ const sendMessage = () => {
 let lijnen = []
 
 const clearCanvas = () => {
-  // if (!roundActive.value) return  // Doel 9
   lijnen = []
   remoteLijnen.value = []
   socket.send({ type: 'clear' })
@@ -140,6 +103,7 @@ const chooseWord = (word) => {
   socket.send({ type: 'choose-word', word, custom: false })
   showWordChoice.value = false
   wordOptions.value = []
+  currentWord.value = word
 }
 
 const submitCustomWord = () => {
@@ -153,10 +117,11 @@ const submitCustomWord = () => {
   showWordChoice.value = false
   customWordInput.value = ''
   customWordError.value = ''
+  currentWord.value = word
 }
 
 const backToLobby = () => {
-  // stopTimer()
+  stopTimer()
   socket.disconnect()
   router.push('/lobby')
 }
@@ -181,7 +146,7 @@ const sketch = (p) => {
       p.line(lijn.x1, lijn.y1, lijn.x2, lijn.y2)
     })
 
-    if (isDrawer.value && p.mouseIsPressed &&
+    if (isDrawer.value && phase.value === 'drawing' && p.mouseIsPressed &&
         p.mouseX > 0 && p.mouseX < p.width && p.mouseY > 0 && p.mouseY < p.height) {
       const lijn = new Lijn(
           p.mouseX, p.mouseY,
@@ -205,10 +170,6 @@ const sketch = (p) => {
   }
 }
 
-// const handleReconnect = () => {
-//   socket.send({ type: 'rejoin', username: username.value })
-// }
-
 onMounted(() => {
   socket.on('draw', (msg) => {
     remoteLijnen.value.push(new Lijn(msg.x1, msg.y1, msg.x2, msg.y2, msg.kleur, msg.dikte))
@@ -227,10 +188,10 @@ onMounted(() => {
     messages.value.push(msg)
   })
   socket.on('correct-answer', (msg) => {
-    messages.value.push({ username: '🎉 Systeem', text: `Correct! Je krijgt ${msg.points} punten.`, timestamp: new Date().toISOString() })
+    messages.value.push({ username: '~ Systeem ~', text: `🎉 Correct! Je krijgt ${msg.points} punten.`, timestamp: new Date().toISOString() })
   })
   socket.on('player-guessed', (msg) => {
-    messages.value.push({ username: '🎉 Systeem', text: `${msg.username} heeft het geraden!`, timestamp: new Date().toISOString() })
+    messages.value.push({ username: '~ Systeem ~', text: `🎉 ${msg.username} heeft het geraden!`, timestamp: new Date().toISOString() })
   })
 
   socket.on('scores-update', (msg) => {
@@ -248,10 +209,15 @@ onMounted(() => {
   })
 
   socket.on('round-started', (msg) => {
+    wordLength.value = msg.wordLength
     showWordChoice.value = false
     wordOptions.value = []
     currentHint.value = ''
+    roundEndReason.value = ''
     phase.value= 'drawing'
+    startTimer(msg.startTime, msg.duration)
+    lijnen = []                        // ← lokale lijnen wissen
+    remoteLijnen.value = []            // ← remote lijnen wissen
     if (msg.hint) {
       currentHint.value = msg.hint
       messages.value.push({
@@ -263,9 +229,11 @@ onMounted(() => {
   })
 
   socket.on('round-ended', (msg) => {
+    currentWord.value = ''
     currentHint.value = ''
     roundEndReason.value = msg.reason || 'Ronde beëindigd'
     phase.value = 'waiting'
+    stopTimer()
     messages.value.push({
       username: '~ Systeem ~',
       text: roundEndReason.value,
@@ -281,20 +249,6 @@ onMounted(() => {
       timestamp: new Date().toISOString()
     })
   })
-
-  // socket.on('round-started', (msg) => {
-  //   wordLength.value = msg.wordLength
-  //   roundEndReason.value = ''
-  //   startClientTimer(msg.startTime, msg.duration)
-  //   messages.value.push({ username: '🎮 Systeem', text: `Nieuwe ronde! Woord heeft ${msg.wordLength} letters.`, timestamp: new Date().toISOString() })
-  // })
-
-  // socket.on('round-ended', (msg) => {
-  //   stopTimer()
-  //   wordLength.value = 0
-  //   roundEndReason.value = msg.reason || 'Ronde beëindigd'
-  //   messages.value.push({ username: '⏱️ Systeem', text: roundEndReason.value, timestamp: new Date().toISOString() })
-  // })
 
   socket.on('player-left', (msg) => {
     messages.value.push({ username: '~ Systeem ~', text: `${msg.username} heeft de verbinding verloren.`, timestamp: new Date().toISOString() })
@@ -317,7 +271,9 @@ onMounted(() => {
     isValidatingTheme.value = false
   })
 
-  // socket.on('socket:connected', handleReconnect)
+  socket.on('drawer-left', () => {
+    router.push('/lobby')
+  })
 
   if (sketchContainer.value) {
     p5Instance = new p5(sketch, sketchContainer.value)
@@ -326,7 +282,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  // stopTimer()
+  stopTimer()
   socket.off('draw')
   socket.off('clear')
   socket.off('role')
@@ -339,23 +295,25 @@ onUnmounted(() => {
   socket.off('round-started')
   socket.off('round-ended')
   socket.off('hint')
-  // socket.off('round-started')
-  // socket.off('round-ended')
   socket.off('player-left')
   socket.off('player-joined')
   socket.off('theme-set')
   socket.off('theme-rejected')
-  // socket.off('socket:connected')
+  socket.off('drawer-left')
   p5Instance.remove()
 })
 </script>
 
-<<template>
+<template>
   <div class="view">
     <h1>Game</h1>
 
-    <div class="game-area">
-      <!-- Thema kiezen — enkel voor tekenaar in fase pick-theme -->
+    <!-- ── BOVENSTE BALK ── -->
+    <!-- Alles wat niet het canvas zelf is: thema kiezen, woord kiezen,
+         het woord tonen, timer, hint, ronde-einde melding -->
+    <div class="top-bar">
+
+      <!-- Thema kiezen — enkel tekenaar, fase pick-theme -->
       <div v-if="isDrawer && phase === 'pick-theme'" class="theme-choice">
         <h3>Kies een thema:</h3>
         <div class="theme-grid">
@@ -369,7 +327,6 @@ onUnmounted(() => {
             {{ theme.label }}
           </button>
         </div>
-
         <div class="custom-theme">
           <label>Of voer een Wikidata ID in (bv. Q729)</label>
           <div class="custom-input-row">
@@ -385,7 +342,6 @@ onUnmounted(() => {
           </div>
           <p v-if="customThemeError" class="error">{{ customThemeError }}</p>
         </div>
-
         <button
             class="confirm-btn"
             @click="confirmTheme"
@@ -395,7 +351,7 @@ onUnmounted(() => {
         </button>
       </div>
 
-      <!-- Woord kiezen — enkel voor tekenaar in fase pick-word -->
+      <!-- Woord kiezen — enkel tekenaar, fase pick-word -->
       <div v-if="isDrawer && phase === 'pick-word'" class="word-choice">
         <div v-if="isLoadingWords" class="loading">⏳ Woorden ophalen...</div>
         <div v-else>
@@ -410,7 +366,6 @@ onUnmounted(() => {
               {{ word }}
             </button>
           </div>
-
           <div class="custom-word">
             <p>Of typ een eigen woord:</p>
             <div class="custom-word-row">
@@ -427,58 +382,46 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Raaders zien een wachtmelding -->
+      <!-- Tekenaar ziet zijn woord tijdens het tekenen -->
+      <div v-if="isDrawer && currentWord" class="word-display drawer">
+        🎨 Jouw woord: <strong>{{ currentWord }}</strong>
+      </div>
+
+      <!-- Raders zien de woordlengte -->
+      <div v-if="!isDrawer && wordLength" class="word-display guesser">
+        Het woord heeft <strong>{{ wordLength }}</strong> letters: {{ wordHint }}
+      </div>
+
+      <!-- Raders wachten op de tekenaar -->
       <div v-if="!isDrawer && phase === 'waiting'" class="waiting-msg">
         ⏳ Wacht op de tekenaar...
       </div>
 
-      <div class="canvas-side">
-
-        <div class="round-end-msg" v-if="roundEndReason">
-          {{ roundEndReason }}
-        </div>
-
-        </div>
-
-        <!-- Hint balk -->
-        <div v-if="currentHint" class="hint-bar">
-          💡 Hint: {{ currentHint }}
-        </div>
-
-        <div ref="sketchContainer" class="sketch-container"></div>
-
-        <div v-if="isDrawer" class="toolbar">
-          <div class="swatches">
-            <button
-                v-for="color in colors"
-                :key="color"
-                class="swatch"
-                :style="{ backgroundColor: color }"
-                :class="{ active: selectedColor === color }"
-                @click="selectedColor = color"
-            />
-            <button
-                class="swatch eraser"
-                :class="{ active: selectedColor === '#F5F0E6' }"
-                @click="selectedColor = '#F5F0E6'"
-            >✖</button>
-          </div>
-          <div class="brush-control">
-            <label>Dikte: {{ brushSize }}</label>
-            <input type="range" min="2" max="40" v-model="brushSize" />
-          </div>
-          <button class="btn-clear" @click="clearCanvas">Clear</button>
-        </div>
-
-        <p v-else class="rader-melding">
-          Jij bent aan het raden — je kan niet tekenen
-        </p>
-
+      <!-- Timer — zichtbaar voor iedereen tijdens een ronde -->
+      <div v-if="roundActive" class="timer-bar" :style="{ color: timerColor }">
+        ⏱ {{ timeLeft }}s
       </div>
 
+      <!-- Ronde einde melding -->
+      <div v-if="roundEndReason && !roundActive" class="round-end-msg">
+        {{ roundEndReason }}
+      </div>
+
+      <!-- Hint balk -->
+      <div v-if="currentHint" class="hint-bar">
+        💡 Hint: {{ currentHint }}
+      </div>
+
+    </div>
+    <!-- einde top-bar -->
+
+    <!-- ── MIDDEN: sidebar links, canvas rechts ── -->
+    <div class="middle-area">
+
+      <!-- Sidebar: scores bovenaan, chat eronder -->
       <div class="sidebar">
         <div class="scoreboard">
-          <h3> Scores</h3>
+          <h3>Scores</h3>
           <ul>
             <li
                 v-for="(score, player) in scores"
@@ -510,12 +453,46 @@ onUnmounted(() => {
             <button :disabled="isDrawer" @click="sendMessage">Stuur</button>
           </div>
         </div>
+      </div>
+      <!-- einde sidebar -->
 
+      <!-- Canvas + toolbar eronder -->
+      <div class="canvas-side">
+        <div ref="sketchContainer" class="sketch-container"></div>
+
+        <div v-if="isDrawer" class="toolbar">
+          <div class="swatches">
+            <button
+                v-for="color in colors"
+                :key="color"
+                class="swatch"
+                :style="{ backgroundColor: color }"
+                :class="{ active: selectedColor === color }"
+                @click="selectedColor = color"
+            />
+            <button
+                class="swatch eraser"
+                :class="{ active: selectedColor === '#F5F0E6' }"
+                @click="selectedColor = '#F5F0E6'"
+            >✖</button>
+          </div>
+          <div class="brush-control">
+            <label>Dikte: {{ brushSize }}</label>
+            <input type="range" min="2" max="40" v-model="brushSize" />
+          </div>
+          <button class="btn-clear" @click="clearCanvas">Clear</button>
+        </div>
+
+        <p v-else class="rader-melding">
+          Jij bent aan het raden — je kan niet tekenen
+        </p>
+      </div>
+      <!-- einde canvas-side -->
 
     </div>
+    <!-- einde middle-area -->
 
     <button class="btn-lobby" @click="backToLobby">Back to Lobby</button>
-
 
   </div>
 </template>
@@ -531,10 +508,16 @@ onUnmounted(() => {
 
 h1 { margin-bottom: 4px; }
 
-.game-area {
+.middle-area {
   display: flex;
   gap: 16px;
   align-items: flex-start;
+}
+.middle-area {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  flex-direction: row-reverse;
 }
 
 .canvas-side {

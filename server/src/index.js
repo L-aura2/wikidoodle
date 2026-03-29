@@ -1,7 +1,6 @@
 import { createServer } from 'http'
 import { WebSocketServer } from 'ws'
-import { fetchWordsForCategory } from './sparql/wordFetcher.js'
-
+import { fetchWordsForCategory, validateCustomTheme, fetchHintsForWord } from './sparql/wordFetcher.js'
 
 const httpServer = createServer()
 const wss = new WebSocketServer({ server: httpServer })
@@ -10,11 +9,11 @@ const gameState = {
     currentWord: null,
     currentDrawer: null,
     roundStartTime: null,
+    roundDuration: 120000,
     currentTheme: null,
     wordPool: [],
-    // roundDuration: 80000,
-    // roundActive: false,
-    scores: {}
+    scores: {},
+    drawerQueue: []
 }
 
 function broadcast(senderWs, message) {
@@ -49,8 +48,30 @@ function handleDrawerDisconnect(username) {
         type: 'round-ended',
         reason: `${username} (tekenaar) heeft de verbinding verloren`
     })
+    broadcastAll({ type: 'drawer-left' })
 }
+function assignNextDrawer() {
+    // Verwijder disconnected clients uit de drawerQueue
+    gameState.drawerQueue = gameState.drawerQueue.filter(ws => ws.readyState === 1)
 
+    if (gameState.drawerQueue.length === 0) return
+
+    const next = gameState.drawerQueue.shift()
+    gameState.drawerQueue.push(next) // Zet de nieuwe tekenaar achteraan in de rij
+
+    gameState.currentDrawer = next
+    gameState.currentWord = null
+    gameState.currentTheme = null
+    gameState.wordPool = []
+
+    // Vertel iedereen zijn nieuwe rol.
+    wss.clients.forEach(client => {
+        if (client.readyState === 1) {
+            const isDrawer = client === next
+            client.send(JSON.stringify({ type: 'role', isDrawer }))
+        }
+    })
+}
 wss.on('connection', (ws) => {
     console.log('Client connected')
 
@@ -73,6 +94,7 @@ wss.on('connection', (ws) => {
             case 'join':
                 ws.username = msg.username
                 gameState.scores[msg.username] = gameState.scores[msg.username] ?? 0
+                gameState.drawerQueue.push(ws)
 
                 // Eerste speler die joint wordt automatisch tekenaar
                 if (gameState.currentDrawer === null) {
@@ -83,17 +105,6 @@ wss.on('connection', (ws) => {
                     ws.send(JSON.stringify({type: 'role', isDrawer: false}))
                 }
                 ws.send(JSON.stringify({type: 'scores-update', scores: gameState.scores}))
-
-                // // Als ronde actief is, stuur ronde-info mee zodat timer synchroon loopt (Doel 8)
-                // if (gameState.roundActive) {
-                //     ws.send(JSON.stringify({
-                //         type: 'round-started',
-                //         wordLength: gameState.currentWord.length,
-                //         startTime: gameState.roundStartTime,
-                //         duration: gameState.roundDuration
-                //     }))
-                // }
-
                 broadcastAll({type: 'player-joined', username: msg.username})
                 broadcastScores()
                 break
@@ -112,9 +123,7 @@ wss.on('connection', (ws) => {
                 break
 
             case 'chat-message': {
-                // if (!gameState.roundActive) return
                 const timestamp = new Date().toISOString()
-
                 if (gameState.currentWord &&
                     msg.text.toLowerCase() === gameState.currentWord.toLowerCase()) {
 
@@ -122,13 +131,22 @@ wss.on('connection', (ws) => {
                     const points = Math.max(10, Math.round(100 - elapsed))
 
                     ws.send(JSON.stringify({type: 'correct-answer', points}))
-
                     gameState.scores[ws.username] = (gameState.scores[ws.username] ?? 0) + points
                     ws.hasGuessed = true
-
                     broadcast(ws, {type: 'player-guessed', username: ws.username})
                     broadcastScores()
-                    // broadcastAll({ type: 'score-update', username: ws.username, points })
+
+                    //check of iedereen geraden heeft
+                    const nonDrawers = [...wss.clients].filter(c => c !== gameState.currentDrawer)
+                    const allGuessed = nonDrawers.length > 0 && nonDrawers.every(c => c.hasGuessed)
+                    if (allGuessed) {
+                        clearTimeout(gameState.hintTimeout)
+                        clearTimeout(gameState.roundTimeout)
+                        broadcastAll({ type: 'round-ended', reason: `Iedereen heeft het geraden! Het woord was: "${gameState.currentWord}"` })
+                        gameState.currentWord = null
+                        assignNextDrawer()
+                    }
+
                 } else {
                     broadcast(ws, {type: 'chat-message', username: ws.username, text: msg.text, timestamp})
                 }
@@ -153,17 +171,18 @@ wss.on('connection', (ws) => {
             case 'end-round': {
                 if (ws !== gameState.currentDrawer) return
                 clearTimeout(gameState.hintTimeout)
-                // gameState.roundActive = false
+                clearTimeout(gameState.roundTimeout)
                 gameState.currentWord = null
                 broadcastAll({type: 'round-ended', reason: 'Ronde beëindigd door tekenaar'})
+                assignNextDrawer()
                 break
             }
             case 'set-theme': {
                 try {
                     let words
                     if (msg.custom) {
-                        const {validateCustomTheme} = await import('./sparql/wordFetcher.js')
                         words = await validateCustomTheme(msg.wikidataId)
+                        console.log(`Custom theme ${msg.wikidataId} has ${words.length} words`)
                         if (words.length < 25) {
                             ws.send(JSON.stringify({
                                 type: 'theme-rejected',
@@ -173,12 +192,14 @@ wss.on('connection', (ws) => {
                         }
                     } else {
                         words = await fetchWordsForCategory(msg.theme)
+                        console.log('Fetched words for theme', msg.theme, 'count:', words.length)
                     }
                     gameState.currentTheme = msg.theme ?? msg.wikidataId
                     gameState.wordPool = words
+                    console.log('Word pool set with', gameState.wordPool.length, 'words')
                     broadcastAll({type: 'theme-set', theme: gameState.currentTheme})
                 } catch (err) {
-                    ws.send(JSON.stringify({type: 'theme-rejected', reason: 'Fout bij ophalen'}))
+                    ws.send(JSON.stringify({type: 'theme-rejected', reason: 'Fout bij ophalen: ' + err}))
                 }
                 break
             }
@@ -195,7 +216,9 @@ wss.on('connection', (ws) => {
                 break
             }
             case 'choose-word': {
-                wss.clients.forEach(c => { c.hasGuessed = false })
+                wss.clients.forEach(c => {
+                    c.hasGuessed = false
+                })
                 if (ws !== gameState.currentDrawer) return
                 const word = msg.word?.trim()
                 if (!word) return
@@ -203,27 +226,34 @@ wss.on('connection', (ws) => {
                 gameState.currentWord = word
                 gameState.roundStartTime = Date.now()
 
-                if (msg.custom) {
-                    broadcastAll({
-                        type: 'round-started',
-                        wordLength: word.length,
-                        hint: `Het woord begint met de letter "${word[0].toUpperCase()}"`
-                    })
-                } else {
-                    broadcastAll({
-                        type: 'round-started',
-                        wordLength: word.length
-                    })
+                const roundPayload = {
+                    type: 'round-started',
+                    wordLength: word.length,
+                    startTime: gameState.roundStartTime,
+                    duration: gameState.roundDuration,
+                    ...(msg.custom ? {hint: `Het woord begint met de letter "${word[0].toUpperCase()}"`} : {})
+                }
+                broadcastAll(roundPayload)
+
+                // Auto-end achter 2 minutes
+                clearTimeout(gameState.roundTimeout)
+                gameState.roundTimeout = setTimeout(() => {
+                    if (!gameState.currentWord) return
+                    broadcastAll({type: 'round-ended', reason: `Tijd is om! Het woord was: "${gameState.currentWord}"`})
+                    gameState.currentWord = null
+                    assignNextDrawer()
+                }, gameState.roundDuration)
+
+                // Hint achter 90s
+                if (!msg.custom) {
+                    clearTimeout(gameState.hintTimeout)
                     gameState.hintTimeout = setTimeout(async () => {
                         if (!gameState.currentWord) return
                         const guessedAll = [...wss.clients].every(c => c.hasGuessed || c === gameState.currentDrawer)
                         if (!guessedAll) {
                             try {
-                                const { fetchHintsForWord } = await import('./sparql/wordFetcher.js')
                                 const hints = await fetchHintsForWord(gameState.currentWord)
-                                if (hints.length > 0) {
-                                    broadcastAll({ type: 'hint', text: hints[0] })
-                                }
+                                if (hints.length > 0) broadcastAll({type: 'hint', text: hints[0]})
                             } catch (e) {
                                 console.error('Hint ophalen mislukt:', e)
                             }
@@ -232,7 +262,6 @@ wss.on('connection', (ws) => {
                 }
                 break
             }
-
         }
     })
 
