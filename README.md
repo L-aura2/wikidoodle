@@ -1,7 +1,7 @@
 # wikidoodle
 
+    npm install 
+    npm run dev 
 
-    npm install vue  
-    npm install p5
-    npm install vite-plugin-pwa -D
-    npm install ws
+
+
