@@ -1,0 +1,10 @@
+[
+  {
+    "source": "https://someone.com/their-post",
+    "target": "https://yoursite.com/",
+    "receivedAt": "2026-03-29T10:00:00.000Z",
+    "author": "Jane",
+    "title": "Cool wikidoodle game!",
+    "excerpt": "I played this game and..."
+  }
+]

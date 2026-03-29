@@ -7,6 +7,8 @@ import { username } from '../stores/username.js'
 import { useSocketStore } from '../stores/socketStore'
 import { THEMES } from '../utils/themes.js'
 import { roundTimer } from '../composables/roundTimer.js'
+// import { useSketch } from '../composables/useSketch.js'
+
 
 let p5Instance = null
 const sketchContainer = ref(null)
@@ -43,6 +45,7 @@ const customThemeInput = ref('')
 const customThemeError = ref('')
 const customThemeSuccess = ref('')
 const isValidatingTheme = ref(false)
+const drawerLeftWarning = ref(false)
 
 const selectTheme = (id) => {
   selectedTheme.value = id
@@ -272,7 +275,7 @@ onMounted(() => {
   })
 
   socket.on('drawer-left', () => {
-    router.push('/lobby')
+    drawerLeftWarning.value = true
   })
 
   if (sketchContainer.value) {
@@ -408,7 +411,7 @@ onUnmounted(() => {
       </div>
 
       <!-- Hint balk -->
-      <div v-if="currentHint" class="hint-bar">
+      <div v-if="!isDrawer || currentHint" class="hint-bar">
         💡 Hint: {{ currentHint }}
       </div>
 
@@ -447,7 +450,7 @@ onUnmounted(() => {
                 v-model="chatInput"
                 type="text"
                 placeholder="Typ je antwoord..."
-                :disabled="isDrawer"
+                :disabled="isDrawer || phase !== 'drawing'"
                 @keyup.enter="sendMessage"
             />
             <button :disabled="isDrawer" @click="sendMessage">Stuur</button>
@@ -493,6 +496,11 @@ onUnmounted(() => {
     <!-- einde middle-area -->
 
     <button class="btn-lobby" @click="backToLobby">Back to Lobby</button>
+
+    <!-- Waarschuwing bij verbroken verbinding tekenaar -->
+    <div v-if="drawerLeftWarning" class="drawer-left-warning">
+      ⚠️ De tekenaar heeft de verbinding verloren. Een nieuwe tekenaar wordt toegewezen.
+    </div>
 
   </div>
 </template>
@@ -833,4 +841,15 @@ h1 { margin-bottom: 4px; }
 }
 
 .error { color: #e74c3c; font-size: 13px; }
+
+.drawer-left-warning {
+  padding: 10px 14px;
+  background: #fff3cd;
+  border: 1px solid #ffeeba;
+  border-radius: 8px;
+  color: #856404;
+  font-size: 14px;
+  margin-top: 16px;
+  text-align: center;
+}
 </style>

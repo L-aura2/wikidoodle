@@ -1,8 +1,18 @@
 import { createServer } from 'http'
 import { WebSocketServer } from 'ws'
 import { fetchWordsForCategory, validateCustomTheme, fetchHintsForWord } from './sparql/wordFetcher.js'
+import express from 'express'
+import fetch from 'node-fetch'
+import fs from 'fs/promises'
+import { fileURLToPath } from 'url'  // ← add this
+import path from 'path'
 
-const httpServer = createServer()
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const MENTIONS_FILE = path.join(__dirname, 'data', 'webmentions.json')
+const app = express()
+app.use(express.urlencoded({ extended: true }))
+app.use(express.json())
+const httpServer = createServer(app)
 const wss = new WebSocketServer({ server: httpServer })
 
 const gameState = {
@@ -49,6 +59,7 @@ function handleDrawerDisconnect(username) {
         reason: `${username} (tekenaar) heeft de verbinding verloren`
     })
     broadcastAll({ type: 'drawer-left' })
+    assignNextDrawer()
 }
 function assignNextDrawer() {
     // Verwijder disconnected clients uit de drawerQueue
@@ -291,6 +302,87 @@ wss.on('connection', (ws) => {
     })
 })
 
+app.post('/webmention', async (req, res) => {
+    const { source, target } = req.body
 
+    // 1. Basic validation
+    if (!source || !target) {
+        return res.status(400).send('source and target are required')
+    }
+
+    let sourceUrl, targetUrl
+    try {
+        sourceUrl = new URL(source)
+        targetUrl = new URL(target)
+    } catch {
+        return res.status(400).send('Invalid URLs')
+    }
+
+    // 2. Target must be on YOUR domain
+    if (targetUrl.hostname !== 'yoursite.com') {
+        return res.status(400).send('Target is not on this domain')
+    }
+
+    // 3. Fetch source and verify it actually links to target
+    let sourceHtml
+    try {
+        const response = await fetch(source, {
+            headers: { 'Accept': 'text/html' },
+            timeout: 5000
+        })
+        if (!response.ok) return res.status(400).send('Could not fetch source')
+        sourceHtml = await response.text()
+    } catch {
+        return res.status(400).send('Could not fetch source')
+    }
+
+    if (!sourceHtml.includes(target)) {
+        return res.status(400).send('Source does not link to target')
+    }
+
+    // 4. Store it
+    const mentions = await readMentions()
+    const existing = mentions.findIndex(m => m.source === source && m.target === target)
+
+    const mention = {
+        source,
+        target,
+        receivedAt: new Date().toISOString(),
+        // Optionally: parse author, title, snippet from sourceHtml here (see Step 4)
+    }
+
+    if (existing !== -1) {
+        mentions[existing] = mention // update existing
+    } else {
+        mentions.push(mention)
+    }
+
+    await saveMentions(mentions)
+
+    // 202 Accepted is the correct spec response (async processing implied)
+    res.status(202).send('Webmention accepted')
+})
+app.get('/webmentions', async (req, res) => {
+    const { target } = req.query
+    let mentions = await readMentions()
+
+    if (target) {
+        mentions = mentions.filter(m => m.target === target)
+    }
+
+    res.json(mentions)
+})
+async function readMentions() {
+    try {
+        const data = await fs.readFile(MENTIONS_FILE, 'utf8')
+        return JSON.parse(data)
+    } catch {
+        return [] // file doesn't exist yet
+    }
+}
+
+async function saveMentions(mentions) {
+    await fs.writeFile(MENTIONS_FILE, JSON.stringify(mentions, null, 2))
+}
 
 httpServer.listen(3000, () => console.log('Server running on http://localhost:3000'))

@@ -24,7 +24,10 @@ export default defineConfig({
             '/ws': {
                 target: 'ws://localhost:3000',
                 ws: true
-            }
+            },
+            '/webmention': 'http://localhost:3000',  // covers both POST /webmention
+            '/webmentions': 'http://localhost:3000', // and GET /webmentions
+
         }
     }
 })

@@ -3,10 +3,11 @@ import { useRouter } from 'vue-router'
 import { username } from '../stores/username.js'
 import { useSocketStore } from '../stores/socketStore'
 import { onMounted, onUnmounted, ref } from 'vue'
-import { THEMES } from '../utils/themes.js'
 
 const router = useRouter()
 const socket = useSocketStore()
+const webmentions = ref([])
+
 
 const joinGame = () => {
   if (!username.value.trim()) return
@@ -51,8 +52,17 @@ const validateCustomTheme = () => {
   tryValidate()
 }
 
-onMounted(() => {
-
+onMounted(async () => {
+  try {
+    const isDev = window.location.hostname === 'localhost'
+    const url = isDev
+        ? '/webmentions'                                                          // no filter in dev
+        : '/webmentions?target=' + encodeURIComponent(window.location.href)      // filter in prod
+    const res = await fetch(url)
+    webmentions.value = await res.json()
+  } catch (e) {
+    console.warn('Could not load webmentions', e)
+  }
 })
 
 onUnmounted(() => {
@@ -87,6 +97,20 @@ onUnmounted(() => {
         <!-- {{ !selectedTheme ? 'Kies eerst een thema' : 'Join Game' }} -->
       </button>
     </div>
+    <section v-if="webmentions.length" class="webmentions">
+      <h2>Mentions</h2>
+      <ul>
+        <li v-for="mention in webmentions" :key="mention.source" class="mention">
+          <a :href="mention.source" target="_blank" rel="noopener">
+            {{ mention.author || mention.source }}
+          </a>
+          <span v-if="mention.title"> — {{ mention.title }}</span>
+          <time :datetime="mention.receivedAt">
+            {{ new Date(mention.receivedAt).toLocaleDateString() }}
+          </time>
+        </li>
+      </ul>
+    </section>
   </div>
 </template>
 
@@ -145,6 +169,39 @@ onUnmounted(() => {
 
 .join-form button:hover:not(:disabled) {
   background: #369870;
+}
+
+.webmentions {
+  margin-top: 40px;
+  width: 100%;
+  max-width: 500px;
+}
+
+.webmentions h2 {
+  font-size: 16px;
+  color: #666;
+  margin-bottom: 10px;
+}
+
+.mention {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 13px;
+  padding: 6px 0;
+  border-bottom: 1px solid #eee;
+}
+
+.mention a {
+  color: #42b983;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.mention time {
+  margin-left: auto;
+  color: #999;
+  font-size: 11px;
 }
 </style>
 
