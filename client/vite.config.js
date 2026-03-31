@@ -22,11 +22,11 @@ export default defineConfig({
     server: {
         proxy: {
             '/ws': {
-                target: 'ws://localhost:3000',
+                target: 'wss://wikidoodle-server.onrender.com/',
                 ws: true
             },
-            '/webmention': 'http://localhost:3000',  // covers both POST /webmention
-            '/webmentions': 'http://localhost:3000', // and GET /webmentions
+            '/webmention': 'https://wikidoodle-server.onrender.com/',  // covers both POST /webmention
+            '/webmentions': 'https://wikidoodle-server.onrender.com/', // and GET /webmentions
 
         }
     }

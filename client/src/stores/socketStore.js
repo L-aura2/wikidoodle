@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 
 export const useSocketStore = defineStore('socket', () => {
     const isConnected = ref(false)
@@ -12,7 +12,7 @@ export const useSocketStore = defineStore('socket', () => {
             return
         }
 
-        ws.value = new WebSocket(`ws://localhost:3000`)
+        ws.value = new WebSocket(`wss://https://wikidoodle-server.onrender.com/`)
 
         ws.value.onopen = () => {
             isConnected.value = true

@@ -6,12 +6,15 @@ import fetch from 'node-fetch'
 import fs from 'fs/promises'
 import { fileURLToPath } from 'url'  // ← add this
 import path from 'path'
+import cors from 'cors'
+
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const MENTIONS_FILE = path.join(__dirname, 'data', 'webmentions.json')
 const app = express()
 app.use(express.urlencoded({ extended: true }))
 app.use(express.json())
+app.use(cors({ origin: 'https://wikidoodle-frontend.onrender.com' }))
 const httpServer = createServer(app)
 const wss = new WebSocketServer({ server: httpServer })
 
@@ -339,7 +342,7 @@ app.post('/webmention', async (req, res) => {
     }
 
     // 2. Target must be on YOUR domain
-    if (targetUrl.hostname !== 'yoursite.com') {
+    if (targetUrl.hostname !== 'wikidoodle-server.onrender.com') {  // Or your frontend domain if applicable
         return res.status(400).send('Target is not on this domain')
     }
 
