@@ -12,7 +12,7 @@ export const useSocketStore = defineStore('socket', () => {
             return
         }
 
-        ws.value = new WebSocket(`wss://https://wikidoodle-server.onrender.com/`)
+        ws.value = new WebSocket(`wss://wikidoodle-server.onrender.com/`)
 
         ws.value.onopen = () => {
             isConnected.value = true
