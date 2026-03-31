@@ -1,12 +1,12 @@
 <script setup>
 import { useRouter } from 'vue-router'
 import { onMounted, onUnmounted, ref, computed } from 'vue'
-import { Lijn } from '../game/Lijn.js'
 import p5 from 'p5'
 import { username } from '../stores/username.js'
 import { useSocketStore } from '../stores/socketStore'
 import { THEMES } from '../utils/themes.js'
 import { roundTimer } from '../composables/roundTimer.js'
+import {Lijn} from "../game/lijn";
 // import { useSketch } from '../composables/useSketch.js'
 
 
@@ -222,8 +222,8 @@ onMounted(() => {
     roundEndReason.value = ''
     phase.value= 'drawing'
     startTimer(msg.startTime, msg.duration)
-    lijnen = []                        // ← lokale lijnen wissen
-    remoteLijnen.value = []            // ← remote lijnen wissen
+    lijnen = []
+    remoteLijnen.value = []
     if (msg.hint) {
       currentHint.value = msg.hint
       messages.value.push({
